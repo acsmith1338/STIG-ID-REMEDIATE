@@ -1,0 +1,129 @@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<#
+.SYNOPSIS
+Checks whether Secure Boot is supported and enabled on this machine.
+
+.DESCRIPTION
+- Verifies the script is running as Administrator.
+- Confirms the system is UEFI-based.
+- Checks Secure Boot state with Confirm-SecureBootUEFI.
+- Shows where you would call OEM BIOS tools to enable Secure Boot
+  (HP, Dell, Lenovo, etc.) if available.
+
+.NOTE
+This script does NOT directly enable Secure Boot,
+because that requires vendor-specific firmware tools.
+#>
+
+# Ensure we are running as Administrator
+$currIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = New-Object Security.Principal.WindowsPrincipal($currIdentity)
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Error "This script must be run as Administrator."
+    return
+}
+
+Write-Host "=== Secure Boot / Platform Check ===" -ForegroundColor Cyan
+
+# Check firmware type (UEFI vs Legacy BIOS)
+try {
+    $firmware = (Get-CimInstance -ClassName Win32_ComputerSystem).BootupState
+    Write-Host "BootupState: $firmware"
+} catch {
+    Write-Warning "Could not determine BootupState via CIM: $_"
+}
+
+# A more direct UEFI check via registry
+$firmwareType = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control').PEFirmwareType 2>$null
+
+switch ($firmwareType) {
+    0 { $firmwareString = "Unknown" }
+    1 { $firmwareString = "BIOS (Legacy)" }
+    2 { $firmwareString = "UEFI" }
+    default { $firmwareString = "Unknown ($firmwareType)" }
+}
+
+Write-Host "Firmware type (PEFirmwareType): $firmwareString"
+
+if ($firmwareType -ne 2) {
+    Write-Warning "This system is not booted in UEFI mode. Secure Boot cannot be enabled in Legacy BIOS mode."
+    return
+}
+
+# Check Secure Boot support and status
+try {
+    $isSecureBootEnabled = Confirm-SecureBootUEFI -ErrorAction Stop
+    if ($isSecureBootEnabled) {
+        Write-Host "Secure Boot is currently: ENABLED" -ForegroundColor Green
+    } else {
+        Write-Host "Secure Boot is currently: DISABLED" -ForegroundColor Yellow
+    }
+} catch {
+    Write-Warning "Secure Boot is not supported or status cannot be queried on this system: $_"
+    return
+}
+
+# Show OEM info to guide what tooling might be used
+$cs = Get-CimInstance -ClassName Win32_ComputerSystem
+$manufacturer = $cs.Manufacturer
+$model        = $cs.Model
+
+Write-Host "Manufacturer: $manufacturer"
+Write-Host "Model       : $model"
+Write-Host ""
+
+if (-not $isSecureBootEnabled) {
+    Write-Host "Secure Boot is DISABLED." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Next steps depend on your OEM:" -ForegroundColor Cyan
+    Write-Host "  1) Manually: Reboot -> Enter BIOS/UEFI -> Enable Secure Boot."
+    Write-Host "  2) Programmatically (advanced, OEM-specific): Use vendor tools." -ForegroundColor Cyan
+
+    Write-Host ""
+    Write-Host "=== Example OEM automation concepts (NOT executed automatically) ===" -ForegroundColor Magenta
+
+    switch -Wildcard ($manufacturer) {
+        "*Dell*" {
+            Write-Host "Dell system detected."
+            Write-Host "You can use Dell Command | Configure or Dell Command | Monitor"
+            Write-Host "from PowerShell, e.g. (conceptual):"
+            Write-Host '  & "C:\Program Files (x86)\Dell\Command Configure\cctk.exe" --secureboot=enable'
+        }
+        "*HP*" {
+            Write-Host "HP system detected."
+            Write-Host "You can use HP BIOS Configuration Utility (BCU), e.g. (conceptual):"
+            Write-Host '  & "C:\Program Files\HP\BIOS Configuration Utility\BiosConfigUtility64.exe" /set:"C:\Path\To\Config.txt"'
+        }
+        "*Lenovo*" {
+            Write-Host "Lenovo system detected."
+            Write-Host "You can use Lenovo WMI-based BIOS settings or Lenovo BIOSConfig tools."
+        }
+        default {
+            Write-Host "Unknown/unsupported OEM for automated BIOS changes."
+            Write-Host "Refer to your manufacturer docs for command-line BIOS tools."
+        }
+    }
+
+    Write-Host ""
+    Write-Host "IMPORTANT: Enabling Secure Boot may prevent the system from booting"
+    Write-Host "if the current OS or bootloader is not Secure Boot compliant."
+}
+else {
+    Write-Host "No action required. Secure Boot is already enabled." -ForegroundColor Green
+}
