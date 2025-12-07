@@ -11,7 +11,7 @@ Checks whether Secure Boot is supported and enabled on this machine.
     Version        : 1.0
     CVEs           : N/A
     Plugin IDs     : N/A
-    STIG-ID        : WN10-AU-000500
+    STIG-ID        : WN10-00-000020
 
 .TESTED ON
     Date(s) Tested  : 
