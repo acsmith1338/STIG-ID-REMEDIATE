@@ -1,0 +1,80 @@
+<#
+.SYNOPSIS
+Validates that domain-joined systems are running Windows 10 Enterprise Edition 64-bit.
+
+.NOTES
+    Author          : Anthony Smith
+    LinkedIn        : linkedin.com/in/acsmith1338/
+    GitHub          : github.com/acsmith1338
+    Date Created    : 2025-12-06
+    Last Modified   : 2025-12-06
+    Version         : 1.0
+    CVEs            : N/A
+    Plugin IDs      : N/A
+    STIG-ID         : WN10-00-000005
+
+.TESTED ON
+    Date(s) Tested  : 
+    Tested By       : 
+    Systems Tested  : 
+    PowerShell Ver. : 
+
+
+.DESCRIPTION
+This script checks:
+1. Whether the device is domain-joined.
+2. Whether the OS is Windows 10.
+3. Whether the OS edition is Enterprise.
+4. Whether the OS architecture is 64-bit.
+
+If any requirement fails, a non-compliance message is displayed.
+#>
+
+Write-Host "=== Windows 10 Enterprise 64-bit Compliance Check ===" -ForegroundColor Cyan
+
+# --- Check if domain joined ---
+$cs = Get-CimInstance -ClassName Win32_ComputerSystem
+
+if (-not $cs.PartOfDomain) {
+    Write-Host "System is NOT domain-joined. Requirement does not apply." -ForegroundColor Yellow
+    return
+}
+
+Write-Host "System is domain-joined to: $($cs.Domain)" -ForegroundColor Green
+
+# --- OS information ---
+$os = Get-CimInstance -ClassName Win32_OperatingSystem
+$caption = $os.Caption
+$architecture = $os.OSArchitecture
+$version = [System.Environment]::OSVersion.Version
+
+Write-Host "Detected OS: $caption"
+Write-Host "Architecture: $architecture"
+
+# --- Requirement checks ---
+$compliant = $true
+
+# 1. Check Windows 10 (e.g., version 10.x.x)
+if ($version.Major -ne 10) {
+    Write-Host "❌ Non-Compliant: System is not running Windows 10." -ForegroundColor Red
+    $compliant = $false
+}
+
+# 2. Check Enterprise edition
+if ($caption -notmatch "Enterprise") {
+    Write-Host "❌ Non-Compliant: OS edition is NOT Enterprise." -ForegroundColor Red
+    $compliant = $false
+}
+
+# 3. Check 64-bit
+if ($architecture -notmatch "64") {
+    Write-Host "❌ Non-Compliant: OS architecture is not 64-bit." -ForegroundColor Red
+    $compliant = $false
+}
+
+# --- Final Compliance Result ---
+if ($compliant) {
+    Write-Host "`n✅ COMPLIANT: System meets the requirement: Windows 10 Enterprise 64-bit." -ForegroundColor Green
+} else {
+    Write-Host "`n❌ NON-COMPLIANT: System does NOT meet the Windows 10 Enterprise 64-bit requirement." -ForegroundColor Red
+}
