@@ -1,0 +1,197 @@
+<#
+.SYNOPSIS
+Remediates DISA STIG WN10-00-000175 and logs all actions.
+
+.NOTES
+    Author          : Anthony Smith
+    LinkedIn        : linkedin.com/in/acsmith1338/
+    GitHub          : github.com/acsmith1338
+    Date Created    : 2025-12-06
+    Last Modified   : 2025-12-06
+    Version         : 1.0
+    CVEs            : N/A
+    Plugin IDs      : N/A
+    STIG-ID         : WN10-AU-000500
+
+.TESTED ON
+    Date(s) Tested  : 
+    Tested By       : 
+    Systems Tested  : 
+    PowerShell Ver. : 
+
+.DESCRIPTION
+WN10-00-000175: "The Secondary Logon service must be disabled on Windows 10."
+
+This script:
+- Checks the Secondary Logon service (seclogon).
+- Ensures Startup Type is Disabled.
+- Stops the service if it is running.
+- Logs all actions to a timestamped file for audit evidence.
+
+.NOTES
+- Must be run as Administrator.
+- Tested on Windows 10 with PowerShell 5+.
+#>
+
+# -------------------------
+# Logging Setup
+# -------------------------
+$LogDirectory = "C:\Logs\STIG"
+if (-not (Test-Path $LogDirectory)) {
+    New-Item -Path $LogDirectory -ItemType Directory -Force | Out-Null
+}
+
+$Timestamp = (Get-Date -Format "yyyyMMdd-HHmmss")
+$LogFile   = "$LogDirectory\WN10-00-000175_$Timestamp.log"
+
+function Write-Log {
+    param(
+        [string]$Message,
+        [string]$Color = "White"
+    )
+
+    $timestampMessage = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $Message"
+    Write-Host $timestampMessage -ForegroundColor $Color
+    Add-Content -Path $LogFile -Value $timestampMessage
+}
+
+Write-Log "=== Starting WN10-00-000175 Remediation (Secondary Logon service) ===" "Cyan"
+
+# -------------------------
+# Admin Check
+# -------------------------
+$currIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$principal    = New-Object Security.Principal.WindowsPrincipal($currIdentity)
+
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Log "ERROR: Script must be run as Administrator." "Red"
+    exit 1
+}
+
+Write-Log "Confirmed script is running with administrative privileges."
+
+# -------------------------
+# OS Info (context)
+# -------------------------
+$os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
+if ($null -ne $os) {
+    Write-Log "Detected OS: $($os.Caption) (Version: $($os.Version))"
+} else {
+    Write-Log "WARNING: Unable to retrieve OS information via CIM." "Yellow"
+}
+
+# -------------------------
+# Check Secondary Logon (seclogon) Service
+# -------------------------
+$serviceName = "seclogon"
+
+try {
+    $service = Get-Service -Name $serviceName -ErrorAction Stop
+    Write-Log "Found service '$($service.DisplayName)' (Name: $serviceName). Current status: $($service.Status)."
+}
+catch {
+    Write-Log "INFO: Service '$serviceName' (Secondary Logon) not found on this system. Considered compliant." "Green"
+    Write-Log "=== Script Completed (Service Not Present) ==="
+    exit 0
+}
+
+# Need startup type, which isn't on Get-Service
+try {
+    $serviceWmi = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'" -ErrorAction Stop
+    $currentStartMode = $serviceWmi.StartMode  # e.g. Auto, Manual, Disabled
+    Write-Log "Current StartMode for '$serviceName' is: $currentStartMode."
+}
+catch {
+    Write-Log "ERROR: Unable to query Win32_Service for '$serviceName'. Exception: $_" "Red"
+    Write-Log "=== Script Terminated (Cannot Determine Start Mode) ==="
+    exit 2
+}
+
+# -------------------------
+# Compliance Check Before Remediation
+# -------------------------
+$compliant = $true
+
+if ($currentStartMode -ne "Disabled") {
+    Write-Log "NON-COMPLIANT: StartMode is not 'Disabled' (actual: $currentStartMode)." "Yellow"
+    $compliant = $false
+}
+
+if ($service.Status -eq "Running") {
+    Write-Log "NON-COMPLIANT: Service status is 'Running' and must be stopped." "Yellow"
+    $compliant = $false
+}
+
+if ($compliant) {
+    Write-Log "System is already compliant with WN10-00-000175. No changes required." "Green"
+    Write-Log "=== Script Completed (Already Compliant) ==="
+    exit 0
+}
+
+# -------------------------
+# Remediation
+# -------------------------
+Write-Log "Starting remediation for WN10-00-000175..." "Cyan"
+
+# 1. Stop service if running
+if ($service.Status -eq "Running") {
+    try {
+        Write-Log "Attempting to stop service '$serviceName'..."
+        Stop-Service -Name $serviceName -Force -ErrorAction Stop
+        Write-Log "Successfully stopped service '$serviceName'."
+    }
+    catch {
+        Write-Log "ERROR: Failed to stop service '$serviceName'. Exception: $_" "Red"
+        # Continue to try to set startup type anyway
+    }
+} else {
+    Write-Log "Service '$serviceName' is not running. No stop action needed."
+}
+
+# 2. Set startup type to Disabled
+try {
+    Write-Log "Setting startup type of '$serviceName' to 'Disabled'..."
+    Set-Service -Name $serviceName -StartupType Disabled
+    Write-Log "Successfully set startup type of '$serviceName' to 'Disabled'."
+}
+catch {
+    Write-Log "ERROR: Failed to set startup type to 'Disabled' for '$serviceName'. Exception: $_" "Red"
+    Write-Log "=== Script Terminated with Errors During Remediation ==="
+    exit 3
+}
+
+# -------------------------
+# Verify Remediation
+# -------------------------
+Write-Log "Verifying service configuration after remediation..."
+
+# Refresh objects
+$service      = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+$serviceWmi   = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
+$finalStatus  = $service.Status
+$finalStart   = $serviceWmi.StartMode
+
+Write-Log "Post-remediation status for '$serviceName': Status = $finalStatus, StartMode = $finalStart."
+
+$finalCompliant = $true
+
+if ($finalStart -ne "Disabled") {
+    Write-Log "STILL NON-COMPLIANT: StartMode is not 'Disabled' after remediation." "Yellow"
+    $finalCompliant = $false
+}
+
+if ($finalStatus -eq "Running") {
+    Write-Log "STILL NON-COMPLIANT: Service is still 'Running' after remediation." "Yellow"
+    $finalCompliant = $false
+}
+
+if ($finalCompliant) {
+    Write-Log "SUCCESS: Secondary Logon service is disabled and not running. System is compliant with WN10-00-000175." "Green"
+    Write-Log "=== Script Completed Successfully ==="
+    exit 0
+}
+else {
+    Write-Log "WARNING: Secondary Logon service could not be fully remediated. Manual review required." "Yellow"
+    Write-Log "=== Script Completed with Outstanding Non-Compliance ==="
+    exit 4
+}
