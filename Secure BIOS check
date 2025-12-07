@@ -1,23 +1,24 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 <#
 .SYNOPSIS
 Checks whether Secure Boot is supported and enabled on this machine.
+
+.NOTES
+    Author         : Anthony Smith
+    LinkedIn       : linkedin.com/in/acsmith1338/
+    GitHub         : github.com/acsmith1338
+    Date Created   : 2025-12-06
+    Last Modified  : 2025-12-06
+    Version        : 1.0
+    CVEs           : N/A
+    Plugin IDs     : N/A
+    STIG-ID        : WN10-AU-000500
+
+.TESTED ON
+    Date(s) Tested  : 
+    Tested By       : 
+    Systems Tested  : 
+    PowerShell Ver. : 
+
 
 .DESCRIPTION
 - Verifies the script is running as Administrator.
