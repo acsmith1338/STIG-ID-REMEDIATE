@@ -1,0 +1,151 @@
+<#
+.SYNOPSIS
+Remediates DISA STIG WN10-00-000160 and logs all actions.
+
+.NOTES
+    Author          : Anthony Smith
+    LinkedIn        : linkedin.com/in/acsmith1338/
+    GitHub          : github.com/acsmith1338
+    Date Created    : 2025-12-06
+    Last Modified   : 2025-12-06
+    Version         : 1.0
+    CVEs            : N/A
+    Plugin IDs      : N/A
+    STIG-ID         : WN10-00-000160
+
+.TESTED ON
+    Date(s) Tested  : 
+    Tested By       : 
+    Systems Tested  : 
+    PowerShell Ver. : 
+
+.DESCRIPTION
+WN10-00-000160: "The Server Message Block (SMB) v1 protocol must be disabled on the system."
+
+This script:
+- Checks the state of the SMB1Protocol Windows optional feature.
+- Disables SMBv1 if it is enabled.
+- Logs all actions and results to a timestamped log file.
+
+.NOTES
+- Must be run as Administrator.
+- Designed for Windows 10+.
+#>
+
+# -------------------------
+# Logging Setup
+# -------------------------
+$LogDirectory = "C:\Logs\STIG"
+if (-not (Test-Path $LogDirectory)) {
+    New-Item -Path $LogDirectory -ItemType Directory -Force | Out-Null
+}
+
+$Timestamp = (Get-Date -Format "yyyyMMdd-HHmmss")
+$LogFile   = "$LogDirectory\WN10-00-000160_$Timestamp.log"
+
+function Write-Log {
+    param(
+        [string]$Message,
+        [string]$Color = "White"
+    )
+
+    $timestampMessage = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') - $Message"
+    Write-Host $timestampMessage -ForegroundColor $Color
+    Add-Content -Path $LogFile -Value $timestampMessage
+}
+
+Write-Log "=== Starting WN10-00-000160 Remediation (Disable SMBv1 on System) ===" "Cyan"
+
+# -------------------------
+# Admin Check
+# -------------------------
+$currIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$principal    = New-Object Security.Principal.WindowsPrincipal($currIdentity)
+
+if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Log "ERROR: Script must be run as Administrator." "Red"
+    exit 1
+}
+
+Write-Log "Confirmed script is running with administrative privileges."
+
+# -------------------------
+# OS Info (for context)
+# -------------------------
+$os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction SilentlyContinue
+if ($null -ne $os) {
+    Write-Log "Detected OS: $($os.Caption) (Version: $($os.Version))"
+} else {
+    Write-Log "WARNING: Unable to retrieve OS info via CIM." "Yellow"
+}
+
+# -------------------------
+# Check SMBv1 Feature State
+# -------------------------
+try {
+    Write-Log "Checking Windows optional feature 'SMB1Protocol' state..."
+
+    $smbFeature = Get-WindowsOptionalFeature -Online -FeatureName SMB1Protocol -ErrorAction Stop
+
+    Write-Log "Current SMB1Protocol State: $($smbFeature.State)"
+
+    switch ($smbFeature.State) {
+        "Disabled" {
+            Write-Log "SMBv1 is already disabled. System is compliant for WN10-00-000160." "Green"
+            Write-Log "=== Script Completed (No Changes Required) ==="
+            exit 0
+        }
+        "DisabledPending" {
+            Write-Log "SMBv1 is disabled pending reboot. System will be compliant after restart." "Yellow"
+            Write-Log "=== Script Completed (Pending Reboot) ==="
+            exit 0
+        }
+        "NotPresent" {
+            Write-Log "SMBv1 feature is not present on this system. System is compliant." "Green"
+            Write-Log "=== Script Completed (Feature Not Present) ==="
+            exit 0
+        }
+        default {
+            Write-Log "SMBv1 is not disabled (state: $($smbFeature.State)). Remediation required." "Yellow"
+        }
+    }
+
+    # -------------------------
+    # Remediation: Disable SMBv1
+    # -------------------------
+    Write-Log "Attempting to disable SMBv1 using Disable-WindowsOptionalFeature..."
+    try {
+        $disableResult = Disable-WindowsOptionalFeature -Online -FeatureName SMB1Protocol -NoRestart -ErrorAction Stop
+
+        Write-Log "Disable-WindowsOptionalFeature returned State: $($disableResult.State)"
+        Write-Log "Note: A reboot may be required for changes to fully apply."
+
+    } catch {
+        Write-Log "ERROR: Failed to disable SMB1Protocol via Disable-WindowsOptionalFeature. Exception: $_" "Red"
+        Write-Log "=== Script Terminated with Errors During Remediation ==="
+        exit 2
+    }
+
+    # -------------------------
+    # Verify Remediation
+    # -------------------------
+    Write-Log "Verifying SMB1Protocol state after remediation attempt..."
+
+    $smbFeaturePost = Get-WindowsOptionalFeature -Online -FeatureName SMB1Protocol -ErrorAction Stop
+    Write-Log "Post-remediation SMB1Protocol State: $($smbFeaturePost.State)"
+
+    if ($smbFeaturePost.State -eq "Disabled" -or $smbFeaturePost.State -eq "DisabledPending" -or $smbFeaturePost.State -eq "NotPresent") {
+        Write-Log "SUCCESS: SMBv1 is now disabled or pending disable. System is compliant with WN10-00-000160." "Green"
+        Write-Log "=== Script Completed Successfully ==="
+        exit 0
+    } else {
+        Write-Log "WARNING: SMBv1 still not disabled (state: $($smbFeaturePost.State)). Manual remediation may be required." "Yellow"
+        Write-Log "=== Script Completed with Outstanding Non-Compliance ==="
+        exit 3
+    }
+}
+catch {
+    Write-Log "ERROR: Unexpected exception while checking/remediating SMB1Protocol: $_" "Red"
+    Write-Log "=== Script Terminated due to Unexpected Error ==="
+    exit 4
+}
